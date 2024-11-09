@@ -1,4 +1,3 @@
-
 import serial # Libreria para leer el serial
 import time # Libreria para timers
 import re  # Libreria para usar expresiones regulares
@@ -16,7 +15,7 @@ from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
 class Ui_MainWindow(object):
     def setupUi(self, MainWindow):
         # Configurar comunicacion serial con Arduino
-        self.serial_port = serial.Serial('COM12', 9600)  # Cambiar el puerto COM si es necesario
+        self.serial_port = serial.Serial('COM13', 9600)  # Cambiar el puerto COM si es necesario
         time.sleep(2)  # Esperar a que el puerto serial se estabilice
 
         # Definir el tamanio de la ventana y el titulo
@@ -81,7 +80,7 @@ class Ui_MainWindow(object):
         self.comboBox.addItem("b) Presion")
         self.comboBox.addItem("c) Luz")
         self.comboBox.addItem("d) Temperatura")
-        # self.comboBox.addItem("e) Temp Ther")
+        self.comboBox.addItem("e) Velocidad")
         self.comboBox.addItem("s) Cancelar")
         # Lista desplegable para las opciones de tiempo de sensado
         self.comboBox_2 = QtWidgets.QComboBox(self.centralwidget)
@@ -135,7 +134,7 @@ class Ui_MainWindow(object):
 
     def retranslateUi(self, MainWindow):
         _translate = QtCore.QCoreApplication.translate
-        MainWindow.setWindowTitle(_translate("MainWindow", "CUBEEK"))
+        MainWindow.setWindowTitle(_translate("MainWindow", "EDUCAN"))
         self.boton_programador.setText(_translate("MainWindow", "Modo programador"))
         self.TextEstatus.setText(_translate("MainWindow", "Estatus:"))
         self.TextSensores.setText(_translate("MainWindow", "Sensores"))
@@ -166,8 +165,8 @@ class Ui_MainWindow(object):
             self.grafica = True
         elif self.sensor_opcion == 'd':
             self.grafica = True
-        # elif self.sensor_opcion == 'e':
-        #     self.grafica = True
+        elif self.sensor_opcion == 'e':
+            self.grafica = True
         else:
             self.grafica = False
                 
@@ -200,9 +199,9 @@ class Ui_MainWindow(object):
                 if self.sensor_opcion == 'd':
                     with open("temperatura.txt", "a") as archivo:
                         archivo.write(datos + "\n")
-                # if self.sensor_opcion == 'e':
-                #     with open("temperaturaTermistor.txt", "a") as archivo:
-                #         archivo.write(datos + "\n")
+                if self.sensor_opcion == 'e':
+                    with open("velocidad.txt", "a") as archivo:
+                        archivo.write(datos + "\n")
 
                 # Condicional para hacer graficas si el sensor seleccionado activo la opcion de grafica 
                 if self.grafica == True:
