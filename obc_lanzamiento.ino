@@ -1,268 +1,130 @@
-#include <SPI.h>
-#include <Wire.h>
-#include <LoRa.h>
+// Librerias I2C para controlar el mpu6050
+// la libreria MPU6050.h necesita I2Cdev.h, I2Cdev.h necesita Wire.h
+#include "I2Cdev.h"
+#include "MPU6050.h"
+#include "Wire.h"
+// Libreria para la el BMP
 #include <Adafruit_BMP085.h>
+// Libreria para la comunicacion con lora
+#include <LoRa.h>
 
-//LORA
+#include <math.h>
+
+
+/*********** IMU ***********/
+// La dirección del MPU6050 puede ser 0x68 o 0x69, dependiendo 
+// del estado de AD0. Si no se especifica, 0x68 estará implicito
+//MPU6050 sensor;
+MPU6050 sensor(0x69);
+// Valores RAW (sin procesar) del acelerometro y giroscopio en los ejes x,y,z
+int ax, ay, az;
+int gx, gy, gz;
+long tiempo_prev;
+float dt;
+float ang_x, ang_y;
+float ang_x_prev, ang_y_prev;
+float a_vertical, velocidad, tiempo_anterior;
+
+/*********** LORA ************/
 const int maxPacketSize = 256; // Maximum expected packet size, adjust as needed
+float tiempo = 0;
 
-//Banderas para envio de sensores dependiendo de la opcion seleccionada desde el GS
-bool op1, op2, op3, op4, op5;
-bool seleccion_sensor = false;
-bool seleccion_tiempo = false;
-int tiempo_sensado = 0;
-int tiempo_inicial = 0;
-int tiempo_actual = 0;
-
-// MPU6050 variables:
-const int MPU = 0x69; // MPU6050 I2C address for AD0 High
-float AccX, AccY, AccZ;
-float GyroX, GyroY, GyroZ;
-float accAngleX, accAngleY, gyroAngleX, gyroAngleY, gyroAngleZ;
-float roll, pitch, yaw;
-float AccErrorX, AccErrorY, GyroErrorX, GyroErrorY, GyroErrorZ;
-float elapsedTime, currentTime, previousTime;
-bool imu_enabled = false;
-
-// BMP085 variables:
+/*********** BMP **************/
 Adafruit_BMP085 bmp;
 float altitude, pressure, tempr;
 bool bmp_enabled = false;
 
-// Velocidad
-float ax, ay, az, ax_anterior, ay_anterior, az_anterior;
-float dt = 0.1;
-float velocidad_x = 0.0;
-float velocidad_y = 0.0;
-float velocidad_z = 0.0;
 
-// Variables para funcion de smart delay
+/*********** GPS **************/
 float currentMillis = 0;
 unsigned long previousMillis = 0;
 
-// Intervalos de tiempo para la lectura de los sensores
-const long intervalIMU = 200; // Intervalo de lecturas del IMU
-const long intervalPRES = 1000; // Intervalo de lecturas de BMP
-const long intervalTEMP = 1000; // Intervalo de lecturas de BMP
-const long intervalLUZ = 1000; // Intervalo de lecturas del sensor de luz
-const long intervalVEL = 10; // Intervalo de lecturas de velocidad
-
-// Inicializacion de las funciones
-void bmp_init();
-void imu_init();
-void readbmp();
-void readIMU();
-void readVEL();
-float filtro_pasobajo();
-void sendSensorData();
 
 
-void setup()
-{
-//  Serial.begin(9600); 
-//  while (!Serial);
-//  Serial.println("CUBEEK Initializing...");
-  imu_init();
-  bmp_init();
-  // communication init:
+void setup() {
+  Serial.begin(57600);    //Iniciando puerto serial
+  Wire.begin();           //Iniciando I2C  
+  sensor.initialize();    //Iniciando el sensor
+
+//  if (sensor.testConnection()) Serial.println("Sensor iniciado correctamente");
+//  else Serial.println("Error al iniciar el sensor");
+  
   LoRa.setPins(8, 9, 2);
   if (!LoRa.begin(433E6))
   {
 //    Serial.println("Starting LoRa failed!");
     while (1);
   }
-
   
-}
-
-void loop()
-{
-  op1 = true; // IMU
-  op2 = true; // Presion
-  op5 = true; // Velocidad
-  
-  sendSensorData();   
-  delay(100);   
-  
-}
-
-
-/* Initialization Code Start!*/
-void bmp_init()
-{
-  bmp_enabled = true;
   if (!bmp.begin())
   {
 //    Serial.println("Could not find a valid BMP085/BMP180 sensor, check wiring!");
     while (1);
   }
+
+  // Valores de una calibracion previa del IMU
+  sensor.setXAccelOffset(-2038);
+  sensor.setYAccelOffset(-1071);
+  sensor.setZAccelOffset(1468);
+  sensor.setXGyroOffset(-18);
+  sensor.setYGyroOffset(-64);
+  sensor.setZGyroOffset(-32);
 }
 
-void imu_init()
-{
-  imu_enabled = true;
-  Wire.begin();
-  Wire.beginTransmission(MPU);
-  Wire.write(0x6B);
-  Wire.write(0x00);
-  Wire.endTransmission(true);
-  calculate_IMU_error();
-}
-
-/* Initialization Code End!*/
-
-// Funcion para calibrar el sensor una vez que se inicializa
-/* IMU Reading Functions Start!*/
-void calculate_IMU_error()
-{
-  int c = 0;
-
-  while (c < 200)
-  {
-    Wire.beginTransmission(MPU);
-    Wire.write(0x3B);
-    Wire.endTransmission(false);
-    Wire.requestFrom(MPU, 6, true);
-    AccX = (Wire.read() << 8 | Wire.read()) / 16384.0;
-    AccY = (Wire.read() << 8 | Wire.read()) / 16384.0;
-    AccZ = (Wire.read() << 8 | Wire.read()) / 16384.0;
-    AccErrorX += atan((AccY) / sqrt(pow((AccX), 2) + pow((AccZ), 2))) * 180 / PI;
-    AccErrorY += atan(-1 * (AccX) / sqrt(pow((AccY), 2) + pow((AccZ), 2))) * 180 / PI;
-    c++;
-  }
-  AccErrorX /= 200;
-  AccErrorY /= 200;
-
-  c = 0;
-
-  while (c < 200)
-  {
-    Wire.beginTransmission(MPU);
-    Wire.write(0x43);
-    Wire.endTransmission(false);
-    Wire.requestFrom(MPU, 6, true);
-    GyroX = (Wire.read() << 8 | Wire.read()) / 131.0;
-    GyroY = (Wire.read() << 8 | Wire.read()) / 131.0;
-    GyroZ = (Wire.read() << 8 | Wire.read()) / 131.0;
-    GyroErrorX += GyroX;
-    GyroErrorY += GyroY;
-    GyroErrorZ += GyroZ;
-    c++;
-  }
-  GyroErrorX /= 200;
-  GyroErrorY /= 200;
-  GyroErrorZ /= 200;
-}
-
-void readIMU() 
-{
-  Wire.beginTransmission(MPU);
-  Wire.write(0x3B);
-  Wire.endTransmission(false);
-  Wire.requestFrom(MPU, 6, true);
-  AccX = (Wire.read() << 8 | Wire.read()) / 16384.0;
-  AccY = (Wire.read() << 8 | Wire.read()) / 16384.0;
-  AccZ = (Wire.read() << 8 | Wire.read()) / 16384.0;
-
-  accAngleX = (atan(AccY / sqrt(pow(AccX, 2) + pow(AccZ, 2))) * 180 / PI) - AccErrorX;
-  accAngleY = (atan(-1 * AccX / sqrt(pow(AccY, 2) + pow(AccZ, 2))) * 180 / PI) + AccErrorY;
-
-  previousTime = currentTime;
-  currentTime = millis();
-  elapsedTime = (currentTime - previousTime) / 1000;
-
-  Wire.beginTransmission(MPU);
-  Wire.write(0x43);
-  Wire.endTransmission(false);
-  Wire.requestFrom(MPU, 6, true);
-  GyroX = (Wire.read() << 8 | Wire.read()) / 131.0;
-  GyroY = (Wire.read() << 8 | Wire.read()) / 131.0;
-  GyroZ = (Wire.read() << 8 | Wire.read()) / 131.0;
-
-  GyroX -= GyroErrorX;
-  GyroY -= GyroErrorY;
-  GyroZ -= GyroErrorZ;
-
-  gyroAngleX += GyroX * elapsedTime;
-  gyroAngleY += GyroY * elapsedTime;
-  
-  yaw += GyroZ * elapsedTime;
-  roll = 0.96 * gyroAngleX + 0.04 * accAngleX;
-  pitch = 0.96 * gyroAngleY + 0.04 * accAngleY;
-}
-/* IMU Reading Functions End!*/
-
-
-/* BMP085 Reading Functions Start!*/
-void readbmp()
-{
-  altitude = bmp.readAltitude();
-//  pressure = bmp.readPressure() / 100.0F;
-//  tempr = bmp.readTemperature();
-}
-/* BMP085 Reading Functions End!*/
-
-void readVEL(){
-  Wire.beginTransmission(MPU);
-  Wire.write(0x3F);
-  Wire.endTransmission(false);
-  Wire.requestFrom(MPU, 2, true);
-  AccZ = (((Wire.read() << 8 | Wire.read()) / 16384.0)*9.81)+9.81-2.34;// Se suma un error
-  
-//  az = filtro_pasobajo(AccZ, az_anterior, 0.9);
-
-  // Integra la aceleración para obtener velocidad
-  velocidad_z += AccZ * dt;
-
-  // Actualiza las lecturas anteriores
-//  az_anterior = az;
-  }
-  
-// Filtro para reduccion de ruido
-float filtro_pasobajo(float nuevoValor, float valorAnterior, float alfa) {
-  return alfa * nuevoValor + (1 - alfa) * valorAnterior;
-}
-
-// Funcion para envio de datos de los sensores
-void sendSensorData()
-{
-  currentMillis = millis()/1000.0; // Se obtiene el tiempo transcurrido para enviar datos cada cierto intervalo de tiempo
-  
-  //Paquetes de cada sensor para enviar por lora 
+void loop() {
+  // Paquete para mandar por lora
   String sensores = "";
   
-  sensores += currentMillis;
-  //IMU
-  if(imu_enabled && op1)
-  {
-    readIMU();  // Función para leer IMU
-    sensores += "\n";
-//    sensores += "\n(YPR): ";
-    sensores += yaw;
-    sensores += ", ";
-    sensores += pitch;
-    sensores += ", ";
-    sensores += roll;
-    sensores += "\n";
-    }
+  // Tiempo
+  tiempo = millis()/1000.0; // Se obtiene el tiempo transcurrido para enviar datos cada cierto intervalo de tiempo
+  sensores += tiempo;
+  sensores += " s \n";
   
-  //Sensor de presion 
-  if(bmp_enabled && op2){
-    readbmp();  // Función para leer BMP
-    sensores += altitude;
-    sensores += " m \n";
-    }
+  // Altitud
+  altitude = bmp.readAltitude();
+  sensores += altitude;
+  sensores += " m \n";
 
-  // Aceleracion y Velocidad
-  if(op5){
-    readVEL();
-    sensores += AccZ;
-    sensores += " m/s2 \n";
-    sensores += velocidad_z;
-    sensores += " m/s";
-    }
+  // IMU - angulo de rotacion
+  // Leer las aceleraciones y velocidades angulares
+  sensor.getAcceleration(&ax, &ay, &az);
+  sensor.getRotation(&gx, &gy, &gz);
   
+  dt = (millis()-tiempo_prev)/1000.0;
+  tiempo_prev=millis();
+  //Calcular los ángulos con acelerometro
+  float accel_ang_x=atan(ay/sqrt(pow(ax,2) + pow(az,2)))*(180.0/PI);
+  float accel_ang_y=atan(-ax/sqrt(pow(ay,2) + pow(az,2)))*(180.0/PI);
+  //Calcular angulo de rotación con giroscopio y filtro complemento  
+  ang_x = 0.98*(ang_x_prev+(gx/131)*dt) + 0.02*accel_ang_x;
+  ang_y = 0.98*(ang_y_prev+(gy/131)*dt) + 0.02*accel_ang_y;
+  ang_x_prev=ang_x;
+  ang_y_prev=ang_y;
+  sensores += ang_x;
+  sensores += "   ";
+  sensores += ang_y;
+  sensores += "\n";
+
+  // IMU - Velocidad
+  // Normalizacion de los valores
+  float ax_m_s2 = ax * (9.81/16384.0);
+  float ay_m_s2 = ay * (9.81/16384.0);
+  float az_m_s2 = az * (9.81/16384.0);
+  a_vertical = ax_m_s2*sin(ang_y*PI/180) + ay_m_s2*sin(ang_x*PI/180) + az_m_s2*cos(ang_y*PI/180)*cos(ang_x*PI/180);
+  a_vertical += 9.81;
+  sensores += a_vertical;
+  sensores += " m/s2 \n";
+  // Calcular tiempo transcurrido
+  dt = (millis() - tiempo_anterior) / 1000.0;
+  tiempo_anterior = millis();
+  // Calculo de la velocidad por medio de la derivada
+  velocidad += a_vertical*dt;
+  sensores += velocidad;
+  sensores += " m/s";
+
+  // Envio del paquete de lora
   LoRa.beginPacket();
   LoRa.print(sensores);
   LoRa.endPacket();
+  delay(100);
 }
