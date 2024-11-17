@@ -120,10 +120,13 @@ class Ui_MainWindow(object):
                 # Inicializar una lista para los matches
                 matches = []
                 # Extraer numeros de cada linea ya sean enteros o decimales
+                # Como se sabe el formato en el cual se recibe el mensaje, solo hacemos un contador y dependiendo el numero de linea
+                # asignamos el valor a su respectiva grafica, esto con el fin de evitar el procesamiento de buscar caracteres en cada linea y tener 
+                # mayor latencia
                 cont = 0
                 for linea in lineas:
                     matches = re.findall(r'[-+]?\d*\.\d+|\d+', linea)  # Agregar todos los matches
-                    if cont == 2:
+                    if cont == 1:
                         if len(matches) >= 1 and float(matches[0])>100.0:
                             valor_altitud = round(float(matches[0])) 
                             self.actualizar_grafica(valor_altitud,cont)
@@ -147,7 +150,7 @@ class Ui_MainWindow(object):
                      
     # Funcion para actualizar la grafica
     def actualizar_grafica(self, y, tipo):
-        if tipo == 2:
+        if tipo == 1:
             self.tiempo_altitud.append(time.time())  # Agregar la marca de tiempo actual
             self.valores_altitud.append(y)  # Agregar el valor del sensor
             # Limpiar la figura y redibujar la grafica
